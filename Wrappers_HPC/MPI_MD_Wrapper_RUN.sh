@@ -8,7 +8,7 @@
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=7
 #SBATCH --time=02:00:00
-#SBATCH --account=project_465000973
+#SBATCH --account=project_XXXX
 
 cat << EOF > select_gpu
 #!/bin/bash
