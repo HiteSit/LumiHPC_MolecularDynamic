@@ -240,15 +240,16 @@ class Wrapper_MMPBSA:
     ----------
     posix_dict : Dict
         A dictionary containing the paths to the PRMTOP and DCD files for each ligand.
+        Compatible with analyzer_dict from Analysis_Lig.py
         Example:
         {
             'C4_fake': {
-                'PRMTOP': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_fake/system.prmtop',
-                'DCD': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_fake/Step3_Md_Rep0.dcd'
+                'PRMTOP_WAT': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_fake/system.prmtop',
+                'DCD_WAT': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_fake/Step3_Md_Rep0.dcd'
             },
             'C4_prep': {
-                'PRMTOP': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_prep/system.prmtop',
-                'DCD': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_prep/Step3_Md_Rep0.dcd'
+                'PRMTOP_WAT': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_prep/system.prmtop',
+                'DCD_WAT': '/home/hitesit/Python_Packages/Holo_MD/examples/C4_prep/Step3_Md_Rep0.dcd'
             }
         }
 
@@ -289,11 +290,13 @@ class Wrapper_MMPBSA:
         return df
     
     def set_MMPBSA(self, posix_key: str):
-        mmpbsa_dir = Path(posix_key) / "MMPBSA"
+        # Create MMPBSA directory relative to the file paths, not the key name
+        base_dir = Path(self.posix_dict[posix_key]["PRMTOP_WAT"]).parent
+        mmpbsa_dir = base_dir / "MMPBSA"
         mmpbsa_dir.mkdir(exist_ok=True)
 
-        prmtop = self.posix_dict[posix_key]["PRMTOP"]
-        dcd = self.posix_dict[posix_key]["DCD"]
+        prmtop = self.posix_dict[posix_key]["PRMTOP_WAT"]
+        dcd = self.posix_dict[posix_key]["DCD_WAT"]
 
         mmpbsa_calc = Calc_MMPBSA(str(mmpbsa_dir), prmtop, dcd, percentage=0.1)
         mmpbsa_calc.run_MMPBSA()
@@ -301,17 +304,18 @@ class Wrapper_MMPBSA:
         mmpbsa_csv_result: Path = mmpbsa_dir / "MMPBSA.csv"
         assert mmpbsa_csv_result.exists()
 
-        return mmpbsa_csv_result
+        # Return both the path and the key (ligand name) for better identification
+        return (mmpbsa_csv_result, posix_key)
     
     def run_MMPBSA(self):
         ligands_to_MMPBS = list(self.posix_dict.keys())
-        mmpbsa_csv_paths: List[Path] = []
+        mmpbsa_results: List[Tuple[Path, str]] = []
         with ProcessPoolExecutor(max_workers=8) as executor:
             futures = [executor.submit(self.set_MMPBSA, ligand) for ligand in ligands_to_MMPBS]
             for future in as_completed(futures):
                 try:
-                    mmpbsa_csv_path: Path = future.result()
-                    mmpbsa_csv_paths.append(mmpbsa_csv_path)
+                    mmpbsa_csv_path, ligname = future.result()
+                    mmpbsa_results.append((mmpbsa_csv_path, ligname))
                 except concurrent.futures.process.BrokenProcessPool as e:
                     print(f"BrokenProcessPool error occurred: {e}")
                 except Exception as e:
@@ -319,18 +323,18 @@ class Wrapper_MMPBSA:
                 else:
                     print(f"Completed successfully")
         
-        return mmpbsa_csv_paths
+        return mmpbsa_results
     
-    def parse_MMPBSA(self, mmpbsa_csv_paths: List[Path]) -> Dict:
+    def parse_MMPBSA(self, mmpbsa_results: List[Tuple[Path, str]]) -> Dict:
         mmpbsa_dict = {}
-        for mmpbsa_csv_path in mmpbsa_csv_paths:
-            ligname = mmpbsa_csv_path.parts[0]
+        for mmpbsa_csv_path, ligname in mmpbsa_results:
+            # Use the provided ligand name instead of parsing the path
             mmpbsa_dict[ligname] = mmpbsa_csv_to_dict(mmpbsa_csv_path)
         
         return mmpbsa_dict
     
     def __call__(self) -> pd.DataFrame:
-        mmpbsa_csv_paths: List[Path] = self.run_MMPBSA()
-        mmpbsa_dict: Dict = self.parse_MMPBSA(mmpbsa_csv_paths)
+        mmpbsa_results: List[Tuple[Path, str]] = self.run_MMPBSA()
+        mmpbsa_dict: Dict = self.parse_MMPBSA(mmpbsa_results)
         mmpbsa_df: pd.DataFrame = self.rationalize_MMPBSA(mmpbsa_dict)
         return mmpbsa_df
