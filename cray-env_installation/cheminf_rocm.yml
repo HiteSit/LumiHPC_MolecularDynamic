@@ -1,0 +1,34 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - openeye::openeye-toolkits
+
+  - openmmforcefields
+  - openff-toolkit
+  - pdbfixer
+
+  - ambertools
+  - pandas
+  - numpy
+  - rdkit
+  - datamol
+  - openpyxl
+  - openssl
+  - openbabel
+  - scikit-learn
+  - mdanalysis
+  - mdanalysistests
+  - nglview
+  - matplotlib
+  - seaborn
+  - smina
+  - biotite
+  - prolif
+  - pymol-open-source
+  - pip
+  - pip:
+      - jupyterlab
+      - toml
+      - tomli
