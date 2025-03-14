@@ -392,6 +392,100 @@ For protein-ligand complex simulations:
 python Wrappers_HPC/MPI_MD_Wrapper.py your_config.toml
 ```
 
+## Parallel Analysis with MPI_Analysis.py
+
+The package includes a powerful MPI-based analysis framework that allows you to process multiple simulation directories in parallel. This is especially useful when you need to analyze large numbers of trajectories on HPC systems.
+
+### Basic Usage
+
+The MPI_Analysis script uses the master-worker pattern to distribute analysis tasks across multiple processors:
+
+```bash
+# Basic usage with MPI
+mpirun -n <num_processes> python MPI_Analysis.py <dir_pattern1> [<dir_pattern2> ...] [--overwrite]
+
+# Example: analyze all directories matching 'complex_*' using 4 processes
+mpirun -n 4 python MPI_Analysis.py 'complex_*'
+
+# Example: analyze multiple directory patterns
+mpirun -n 8 python MPI_Analysis.py 'complex_*' 'protein_*'
+
+# Example: use overwrite flag to regenerate analysis files
+mpirun -n 4 python MPI_Analysis.py 'complex_*' --overwrite
+```
+
+### How It Works
+
+1. The master process (rank 0) finds all directories matching the specified patterns
+2. Work items are dynamically distributed to worker processes
+3. Each worker processes one directory at a time and reports results back to the master
+4. As workers complete their tasks, the master assigns new directories until all work is done
+5. A progress bar shows the overall completion status
+6. Summary statistics are provided upon completion
+
+### Key Features
+
+- **Dynamic Load Balancing**: Automatically distributes work based on worker availability
+- **Error Handling**: Continues processing other directories even if some fail
+- **Progress Tracking**: Shows real-time progress with tqdm
+- **Summary Reports**: Provides detailed success/failure statistics
+
+### Required Files
+
+For each simulation directory, the following files must exist:
+
+- `*.dcd`: Original trajectory with water
+- `system.prmtop`: System topology file with water
+- `system_noWAT.prmtop`: System topology without water
+- `*_noWAT.xtc`: Trajectory without water in XTC format
+- `*_noWAT.dcd`: Trajectory without water in DCD format
+- `Minimized_noWAT.pdb`: Structure file without water
+- `Clusters.pdb`: Cluster representative structures
+
+### Using the Processed Data
+
+After running the MPI_Analysis script, you can use the generated files with the analysis functions from Analysis_Lig:
+
+```python
+from HPC_MD.Analysis_Lig import find_matching_directories, create_analyzer_dict
+
+# Create analyzer dictionary using the same directory patterns
+md_dirs = ["complex_*", "protein_*"]
+file_paths = find_matching_directories(md_dirs)
+analyzer_dict = create_analyzer_dict(file_paths)
+
+# Now you can use this dictionary with all the analysis functions
+# described in the "Trajectory Analysis" section
+```
+
+### Running on LUMI or Other HPC Systems
+
+For HPC environments, create a job script:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=MD_Analysis
+#SBATCH --output=analysis_%j.out
+#SBATCH --error=analysis_%j.err
+#SBATCH --partition=standard
+#SBATCH --nodes=1
+#SBATCH --ntasks=32
+#SBATCH --time=04:00:00
+#SBATCH --account=project_XXXXX
+
+# Load required modules
+module load cray-python
+
+# Run the MPI analysis
+srun python MPI_Analysis.py 'complex_*' 'protein_*'
+```
+
+Save the script as `run_analysis.sh` and submit with:
+
+```bash
+sbatch run_analysis.sh
+```
+
 ## Output Files
 
 The simulation generates several output files:

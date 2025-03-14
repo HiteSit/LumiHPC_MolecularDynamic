@@ -6,9 +6,7 @@ from pathlib import Path
 from mpi4py import MPI
 from tqdm import tqdm
 
-# # Add parent directory to path so we can import the Analysis_Lig module
-# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.Analysis_Lig import MD_Analyzer, find_matching_directories
+from HPC_MD.Analysis_Lig import MD_Analyzer, find_matching_directories
 
 def process_directory(dirname, files, overwrite=False):
     """
