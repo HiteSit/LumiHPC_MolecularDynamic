@@ -83,7 +83,7 @@ def find_matching_directories(md_output_dir):
     """
     file_paths = {}
     prmtop_filename = "system.prmtop"
-    dcd_pattern = re.compile(r'.*0\.dcd$')
+    dcd_pattern = re.compile(r'.*0.dcd')
     
     for root, dirs, _ in os.walk("."):
         for dir_name in dirs:
@@ -142,6 +142,9 @@ def create_analyzer_dict(file_paths, overwrite=False):
         dcd_nowat = Path(str(dcd_wat).replace(".dcd", "_noWAT.dcd"))
         assert dcd_nowat.exists()
         
+        dcd_wat_slice = Path(str(dcd_wat).replace(".dcd", "_WAT.dcd"))
+        assert dcd_wat_slice.exists()
+        
         pdb_file = Path(dirname) / "Minimized_noWAT.pdb"
         assert pdb_file.exists()
         
@@ -152,9 +155,9 @@ def create_analyzer_dict(file_paths, overwrite=False):
         analyzer_dict[dirname]["PDB_noWAT"] = str(pdb_file)
         analyzer_dict[dirname]["XTC_noWAT"] = str(xtc_nowat)
         analyzer_dict[dirname]["DCD_noWAT"] = str(dcd_nowat)
+        analyzer_dict[dirname]["DCD_WAT"] = str(dcd_wat_slice)
         
         analyzer_dict[dirname]["CLUSTER"] = str(cluster_file)
-        
         analyzer_dict[dirname]["CLASS"] = analyzer
     
     return analyzer_dict
@@ -190,46 +193,62 @@ class Pytraj_Analysis():
         self.top_path = Path(top_path)
         self.overwrite = overwrite
 
-        # Set the slice factor
+        # General settings
         SLICE = 20
+        SLICE_MULTIPLIER = 1.6
         MASK_WAT = "!(:HOH,NA,CL)"
         MASK_CLUSTER = "!@H="
+        
+        cluster_opts = {"MASK_WAT": MASK_WAT, "MASK_CLUSTER": MASK_CLUSTER, "NUM": 10}
 
         # Define output paths
         self.xtc_path = self.md_dir / "Step3_Md_Rep0_noWAT.xtc"
         self.dcd_path = self.md_dir / "Step3_Md_Rep0_noWAT.dcd"
+        self.dcd_wat_slice = self.md_dir / "Step3_Md_Rep0_WAT.dcd"
+        
         self.nowat_top_path = self.md_dir / "system_noWAT.prmtop"
         self.pdb_path = self.md_dir / "Minimized_noWAT.pdb"
         self.cluster_path = self.md_dir / "Clusters.pdb"
+        
+        all_files_exist = (
+            self.xtc_path.exists() and 
+            self.nowat_top_path.exists() and 
+            self.dcd_path.exists() and
+            self.dcd_wat_slice.exists() and
+            self.pdb_path.exists() and
+            self.cluster_path.exists()
+        )
 
         # Handle trajectory loading and processing
         if str(traj_path).endswith(".dcd"):
-            if not overwrite and self.xtc_path.exists() and self.nowat_top_path.exists():
-                # Skip processing, load from existing XTC
-                self.traj_noWAT = pt.iterload(str(self.xtc_path), str(self.nowat_top_path))
+            if not overwrite:
+                self.traj_noWAT = pt.iterload(str(self.dcd_path), str(self.nowat_top_path))            # Load no-water DCD
             else:
                 # Process DCD (heavy computation)
                 self.traj_WAT = pt.iterload(str(self.traj_path), str(self.top_path), stride=SLICE)     # Load with stride
                 self.traj_WAT.autoimage()                                                              # Fix box image
                 self.traj_WAT.superpose(mask="@CA", ref=0)                                             # Superpose on first frame
                 self.traj_noWAT = self.traj_WAT[MASK_WAT]                                              # Remove water, ions, and ligands
-                # Write XTC
+                
+                # Write XTC and DCD
                 pt.write_traj(str(self.xtc_path), self.traj_noWAT, overwrite=True)
-                # Write DCD
                 pt.write_traj(str(self.dcd_path), self.traj_noWAT, overwrite=True)
-                # Write TOP
+                
+                # Write DCD with super-sliced frames
+                SS = int(SLICE * SLICE_MULTIPLIER)
+                TMP_TRAJ = self.traj_WAT[::SS]
+                pt.write_traj(str(self.dcd_wat_slice), TMP_TRAJ, overwrite=True)
+                
+                # Write noWAT topology
                 pt.save(str(self.nowat_top_path), self.traj_noWAT.top, overwrite=True)
+                
+                # Write clusters
+                self.cluster_traj(cluster_opts)
         else:
             raise ValueError(f"Trajectory file {self.traj_path} is not a DCD file")
 
-        # Convert to PDB if needed (heavy if trajectory is large)
-        if overwrite or not self.pdb_path.exists():
-            pt.write_traj(str(self.pdb_path), self.traj_noWAT, frame_indices=[0], overwrite=True)
-
-        # Cluster if needed (heavy computation)
-        if overwrite or not self.cluster_path.exists():
-            cluster_opts = {"MASK_WAT": MASK_WAT, "MASK_CLUSTER": MASK_CLUSTER, "NUM": 10}
-            self.cluster_traj(cluster_opts)
+        # Convert to PDB the first frame
+        pt.write_traj(str(self.pdb_path), self.traj_noWAT, frame_indices=[0], overwrite=True)
 
     def cluster_traj(self, cluster_opts):
         try:
@@ -723,16 +742,28 @@ def create_trajectory_archive(zip_filename, file_paths):
         for run_dir, files in file_paths.items():
             # Add file to the zip file, with the appropriate directory structure
             
-            prmtop = files.get("PRMTOP_noWAT", "")
+            prmtop_nowat = files.get("PRMTOP_noWAT", "")
+            prmtop_wat = files.get("PRMTOP_WAT", "")
             xtc = files.get("XTC_noWAT", "")
             dcd = files.get("DCD_noWAT", "")
+            dcd_wat = files.get("DCD_WAT", "")
             pdb = files.get("PDB_noWAT", "")
             cluster = files.get("CLUSTER", "")
             
-            if prmtop:
-                prmtop_path = Path(prmtop)
+            if prmtop_nowat:
+                prmtop_path = Path(prmtop_nowat)
                 arcname = str(Path(run_dir) / prmtop_path.name)
-                zipf.write(prmtop, arcname)
+                zipf.write(prmtop_nowat, arcname)
+            
+            if prmtop_wat:
+                prmtop_path = Path(prmtop_wat)
+                arcname = str(Path(run_dir) / prmtop_path.name)
+                zipf.write(prmtop_wat, arcname)
+            
+            if dcd_wat:
+                dcd_path = Path(dcd_wat)
+                arcname = str(Path(run_dir) / dcd_path.name)
+                zipf.write(dcd_wat, arcname)
             
             if xtc:
                 xtc_path = Path(xtc)

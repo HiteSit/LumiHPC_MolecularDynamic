@@ -254,31 +254,32 @@ def main():
     
     # Parse command line arguments
     if rank == 0:
-        if len(sys.argv) < 2:
-            print("Usage: mpirun -n <num_processes> python Wrappers_HPC/MPI.py <dir_pattern1> [<dir_pattern2> ...]")
-            print("Example: mpirun -n 4 python Wrappers_HPC/MPI.py 'complex_*' 'protein_*'")
-            
+        import argparse
+        parser = argparse.ArgumentParser(description='Run MPI-based analysis on molecular dynamics data')
+        parser.add_argument('patterns', nargs='+', help='Directory patterns to match (e.g., "complex_*")')
+        parser.add_argument('--overwrite', action='store_true', help='Overwrite existing processed files')
+        
+        # Show help message if no arguments provided
+        if len(sys.argv) == 1:
+            parser.print_help()
             # Send DONE signal to all workers
             for worker_rank in range(1, size):
                 comm.send(("DONE", None), dest=worker_rank, tag=1)
             return
+            
+        args = parser.parse_args()
+        md_output_dir = args.patterns
+        overwrite = args.overwrite
         
-        # Get directory patterns from command line
-        md_output_dir = sys.argv[1:]
-        overwrite = False  # We default to not overwriting
-        
-        # Check for overwrite flag
-        if "--overwrite" in md_output_dir:
-            md_output_dir.remove("--overwrite")
-            overwrite = True
+        if overwrite:
             print("Overwrite mode enabled")
     else:
         md_output_dir = None
         overwrite = None
     
-    # Only needed if we want to broadcast these values to all processes
-    # md_output_dir = comm.bcast(md_output_dir, root=0)
-    # overwrite = comm.bcast(overwrite, root=0)
+    # Broadcast values to all processes
+    md_output_dir = comm.bcast(md_output_dir, root=0)
+    overwrite = comm.bcast(overwrite, root=0)
     
     # Run MPI-based processing - does not return anything
     mpi_process_directories(md_output_dir, overwrite)
