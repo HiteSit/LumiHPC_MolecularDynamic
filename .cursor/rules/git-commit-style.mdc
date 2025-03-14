@@ -1,0 +1,73 @@
+---
+description: GIT Guidelines
+globs: .git/COMMIT_EDITMSG
+alwaysApply: false
+---
+# Git Commit Style Guide
+
+Standards for writing more human, philosophical git commit messages when requested in chat.
+
+<rule>
+name: fluid_git_commits
+description: Guidelines for crafting meaningful, fluid git commit messages that focus on the why and what rather than technical details
+
+filters:
+  - type: file_path
+    pattern: "COMMIT_EDITMSG$"
+  - type: event
+    pattern: "file_edit"
+  - type: chat_trigger
+    patterns:
+      - "commit now"
+      - "commit the changes"
+      - "write a commit"
+      - "prepare a commit message"
+      - "git commit"
+
+actions:
+  - type: suggest
+    message: |
+      When writing git commits (activated by chat requests like "commit now please"):
+
+      1. Focus on WHAT changed philosophically, not just code mechanics
+         - Bad: "Updated user.js to fix validation bug"
+         - Good: "Fixed account creation flow to be more forgiving with input formats"
+
+      2. Include the motivation behind changes
+         - Bad: "Added new button to header"
+         - Good: "Added quick-access button to streamline the most common user journey"
+
+      3. Clearly indicate refactoring when applicable
+         - Bad: "Changed code structure in payment module"
+         - Good: "Refactored payment logic for clarity without changing behavior"
+
+      4. Use natural language that tells a story
+         - Bad: "Implement feature X"
+         - Good: "Introduce ability for users to customize their profiles"
+
+      5. Consider including emotional context when relevant
+         - "Fixed frustrating login edge case that confused new users"
+
+      6. Keep messages concise but complete - aim for clarity without verbosity
+
+      NOTE: This rule is activated when the user specifically requests commit help in chat
+      with phrases like "commit now please" or "write a commit message for these changes".
+
+examples:
+  - input: "Fixed bug in login.js"
+    output: "Fixed account verification to handle expired sessions more gracefully"
+  
+  - input: "Updated CSS for mobile"
+    output: "Improved mobile experience by making navigation more thumb-friendly"
+  
+  - input: "Refactored auth code"
+    output: "Refactored authentication flow to remove duplication while preserving security model"
+
+  - input: "Added new endpoint"
+    output: "Added API endpoint that gives users more control over notification settings"
+
+metadata:
+  priority: medium
+  version: 1.0
+  activation: chat_request
+</rule>

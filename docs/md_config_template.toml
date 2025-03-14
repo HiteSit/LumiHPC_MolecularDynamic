@@ -1,0 +1,127 @@
+# This is a template configuration file for MPI_MD_Wrapper.py with all available parameters.
+# Lines starting with # are comments and will be ignored.
+
+# Required: Set mode to either 'apo' (for protein simulations) or 'lig' (for ligand simulations)
+[mode]
+type = "apo"  # Use "apo", "lig" or "legacy"
+
+# Settings for input file paths and patterns
+[paths]
+# APO mode settings
+protein_folder = "./Proteins"
+protein_glob_pattern = "*.cif"
+
+# LIG mode settings
+ligand_folder = "./Ligands_To_MD_V2"
+ligand_glob_pattern = "C*.sdf"
+fixed_receptor_path = "./LAC3_Homology_H_Min_Cut.pdb"
+
+# Legacy mode settings - explicitly define protein-ligand pairs
+# Each key will be used as the work directory for simulation outputs
+[legacy.runs]
+# Format: RunName = { protein = "path/to/protein.pdb", ligand = "path/to/ligand.sdf" }
+# For protein-only simulation, use ligand = "APO"
+Example1 = { protein = "./Proteins/protein1.pdb", ligand = "./Ligands/ligand1.sdf" }
+Example2 = { protein = "./Proteins/protein2.pdb", ligand = "APO" }
+
+# General simulation parameters
+[system]
+delta_pico = 0.002
+rerun = false
+
+# Parameters for NVT equilibration step
+[nvt]
+steps = 400
+dcd_save = 50
+log_save = 1
+# List of temperatures
+temps_list = [50, 100, 150, 200, 250, 300, 301]
+
+# Parameters for NPT equilibration step
+[npt]
+steps = 400
+dcd_save = 50
+log_save = 1
+# List of restraint values
+rests_list = [1000000000, 100000, 1000, 100, 10, 1]
+# Atoms to apply restraints to
+atoms_to_restraints = ["CA"]
+
+# Parameters for production MD step
+[md]
+steps = 150000
+dcd_save = 100
+log_save = 10
+
+
+#############################
+# EXAMPLE: APO MODE CONFIG
+#############################
+
+# Example APO mode config:
+#
+# [mode]
+# type = "apo"
+#
+# [paths]
+# protein_folder = "./Proteins"
+# protein_glob_pattern = "*.cif"
+#
+# [system]
+# delta_pico = 0.002
+# rerun = false
+#
+# [nvt]
+# steps = 400
+# dcd_save = 50
+# log_save = 1
+# temps_list = [50, 100, 150, 200, 250, 300, 301]
+#
+# [npt]
+# steps = 400
+# dcd_save = 50
+# log_save = 1
+# rests_list = [1000000000, 100000, 1000, 100, 10, 1]
+# atoms_to_restraints = ["CA"]
+#
+# [md]
+# steps = 150000
+# dcd_save = 100
+# log_save = 10
+
+
+#############################
+# EXAMPLE: LIG MODE CONFIG
+#############################
+
+# Example LIG mode config:
+#
+# [mode]
+# type = "lig"
+#
+# [paths]
+# ligand_folder = "./Ligands_To_MD_V2"
+# ligand_glob_pattern = "C*.sdf"
+# fixed_receptor_path = "./LAC3_Homology_H_Min_Cut.pdb"
+#
+# [system]
+# delta_pico = 0.002
+# rerun = false
+#
+# [nvt]
+# steps = 400
+# dcd_save = 50
+# log_save = 1
+# temps_list = [50, 100, 150, 200, 250, 300, 301]
+#
+# [npt]
+# steps = 400
+# dcd_save = 50
+# log_save = 1
+# rests_list = [1000000000, 100000, 1000, 100, 10, 1]
+# atoms_to_restraints = ["CA"]
+#
+# [md]
+# steps = 150000
+# dcd_save = 100
+# log_save = 10 
