@@ -196,10 +196,12 @@ class Pytraj_Analysis():
         # General settings
         SLICE = 20
         SLICE_MULTIPLIER = 1.6
+        SLICE_DIVIDER = 4
+        
         MASK_WAT = "!(:HOH,NA,CL)"
         MASK_CLUSTER = "!@H="
         
-        cluster_opts = {"MASK_WAT": MASK_WAT, "MASK_CLUSTER": MASK_CLUSTER, "NUM": 10}
+        cluster_opts = {"MASK_WAT": MASK_WAT, "MASK_CLUSTER": MASK_CLUSTER, "NUM": 10, "SLICE": SLICE / SLICE_DIVIDER}
 
         # Define output paths
         self.xtc_path = self.md_dir / "Step3_Md_Rep0_noWAT.xtc"
@@ -255,8 +257,8 @@ class Pytraj_Analysis():
             mask_wat = cluster_opts["MASK_WAT"]
             mask_cluster = cluster_opts["MASK_CLUSTER"]
             n_clust = cluster_opts["NUM"]
-            
-            TMP_TRAJ = pt.iterload(str(self.traj_path), str(self.top_path))[mask_wat]
+            slice = cluster_opts["SLICE"]
+            TMP_TRAJ = pt.iterload(str(self.traj_path), str(self.top_path), stride=slice)[mask_wat]
             TMP_TRAJ.autoimage()
             TMP_TRAJ.superpose(mask="@CA", ref=0)     
             cluster_data = kmeans(TMP_TRAJ, mask=mask_cluster, n_clusters=n_clust)
