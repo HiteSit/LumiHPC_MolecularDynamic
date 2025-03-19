@@ -75,6 +75,70 @@ from HPC_MD.Vanilla_MD import Run_MD
 # Run the complete workflowRun_MD.equilibration_production(system_settings, nvt_settings, npt_settings, md_settings)
 ```
 
+### Quick Start: Simple MD Simulation Example
+
+For a minimal working example that can be run in a Jupyter notebook or as a standalone script:
+
+```python
+import os
+from pathlib import Path
+from HPC_MD.Vanilla_MD import Run_MD
+
+# Define paths - replace with your actual file paths
+protein_path = "./example_protein.pdb"  # Path to your protein structure
+output_dir = "./md_output"              # Output directory for results
+
+# Create the output directory if it doesn't exist
+os.makedirs(output_dir, exist_ok=True)
+
+# 1. System settings
+system_settings = {
+    "receptor_path": protein_path,
+    "ligand_path": "APO",               # "APO" indicates protein-only simulation
+    "delta_pico": 0.002,                # Time step in picoseconds
+    "rerun": False,                     # Set to True to continue from checkpoint
+    "gpu_id": "0",                      # GPU to use (set to "" for CPU)
+    "output_dir": output_dir            # Where results will be saved
+}
+
+# 2. NVT settings (heating phase)
+nvt_settings = {
+    "steps": 5000,                      # Total steps for NVT phase
+    "dcd_save": 500,                    # Save trajectory every 500 steps
+    "log_save": 100,                    # Save log every 100 steps
+    "temps_list_simulating": [50, 100, 150, 200, 250, 300]  # Gradual heating
+}
+
+# 3. NPT settings (equilibration phase)
+npt_settings = {
+    "steps": 5000,                      # Total steps for NPT phase
+    "dcd_save": 500,                    # Save trajectory every 500 steps
+    "log_save": 100,                    # Save log every 100 steps
+    "rests_list_decreasing": [1000000, 10000, 100, 10, 1],  # Decreasing restraints
+    "atoms_to_restraints": {"CA"}       # Restrain only alpha carbons
+}
+
+# 4. MD settings (production phase)
+md_settings = {
+    "steps": 10000,                     # Total steps for production
+    "dcd_save": 1000,                   # Save trajectory every 1000 steps
+    "log_save": 100                     # Save log every 100 steps
+}
+
+# Run the simulation
+runner = Run_MD()
+runner.equilibration_production(system_settings, nvt_settings, npt_settings, md_settings)
+
+print("Simulation completed!")
+```
+
+This minimal example shows the essential components needed to run a basic MD simulation. It performs a shorter simulation suitable for testing and learning purposes, with:
+1. A heating phase with gradually increasing temperature
+2. An equilibration phase with gradually decreasing restraints
+3. A brief production phase
+
+For production research, you would want to increase the step counts significantly.
+
 ### Continuing a Simulation from Checkpoint
 
 To restart a simulation from a previously saved checkpoint:
@@ -185,7 +249,7 @@ from HPC_MD.Analysis_Lig import create_trajectory_archive
 
 ## Configuration
 
-The simulation is configured using TOML files. Here’s an example configuration:
+The simulation is configured using TOML files. Here's an example configuration:
 
 ```toml
 [mode]type = "apo"  # Options: "apo" for protein-only, "lig" for protein-ligand[paths]protein_folder = "./Apo_Structures"protein_glob_pattern = "*.cif"# For lig mode: fixed_receptor_path = "./path/to/receptor.pdb"[system]delta_pico = 0.002  # Time step in picosecondsrerun = false       # Whether to continue from checkpoint[nvt]steps = 400         # NVT equilibration stepsdcd_save = 50       # Save trajectory every N stepslog_save = 1        # Save log every N steps[npt]steps = 400         # NPT equilibration stepsdcd_save = 50log_save = 1[md]steps = 150000      # Production MD steps (150 ns with 0.002 ps timestep)dcd_save = 100      # Save trajectory every 100 steps (0.2 ns)log_save = 10       # Save log every 10 steps (0.02 ns)
