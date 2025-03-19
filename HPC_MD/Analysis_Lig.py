@@ -257,7 +257,8 @@ class Pytraj_Analysis():
             mask_wat = cluster_opts["MASK_WAT"]
             mask_cluster = cluster_opts["MASK_CLUSTER"]
             n_clust = cluster_opts["NUM"]
-            slice = cluster_opts["SLICE"]
+            slice = int(cluster_opts["SLICE"])
+            
             TMP_TRAJ = pt.iterload(str(self.traj_path), str(self.top_path), stride=slice)[mask_wat]
             TMP_TRAJ.autoimage()
             TMP_TRAJ.superpose(mask="@CA", ref=0)     
