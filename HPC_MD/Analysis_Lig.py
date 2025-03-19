@@ -257,6 +257,8 @@ class Pytraj_Analysis():
             n_clust = cluster_opts["NUM"]
             
             TMP_TRAJ = pt.iterload(str(self.traj_path), str(self.top_path))[mask_wat]
+            TMP_TRAJ.autoimage()
+            TMP_TRAJ.superpose(mask="@CA", ref=0)     
             cluster_data = kmeans(TMP_TRAJ, mask=mask_cluster, n_clusters=n_clust)
             centroids = list(cluster_data.centroids)
             self.traj_Cluster = TMP_TRAJ[centroids]
