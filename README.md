@@ -260,10 +260,89 @@ print(results_df.sort_values(by='GB'))
   - `Vanilla_MD.py`: Main MD simulation engine
   - `Analysis_Lig.py`: Trajectory analysis tools
   - `Calc_MMPBSA.py`: MM-PBSA calculations
+  - `Call_Runner.py`: Job script generator for HPC systems
+  - `Lumi_Interface.py`: SSH interface for LUMI HPC system
 - **Wrappers_HPC/**: Scripts for HPC execution
   - `MPI_MD_Wrapper.py`: Parallel simulation runner
   - `MPI_Analysis.py`: Parallel trajectory analyzer
 - **docs/**: Configuration examples
+
+## Job Management & HPC Integration
+
+LumiHPC MolecularDynamic provides tools for creating job scripts and managing HPC workflows.
+
+### Job Script Generation
+
+Use `Call_Runner.py` to generate customized SLURM job scripts:
+
+```bash
+# Generate MD job script
+python HPC_MD/Call_Runner.py --type md --wrapper-path Wrappers_HPC/MPI_MD_Wrapper.py --output md_job.sh
+
+# Generate analysis job script
+python HPC_MD/Call_Runner.py --type analysis --analysis-script HPC_MD/Analysis_Lig.py --script-args "--input trajectory.dcd"
+```
+
+Or import as a module:
+
+```python
+from HPC_MD.Call_Runner import generate_md_runner
+
+# Create MD job script with custom parameters
+script = generate_md_runner(
+    job_name="LAG3_Simulation",
+    nodes=2,
+    ntasks_per_node=4,
+    gpus_per_node=4,
+    time="10:00:00",
+    account="project_465001750",
+    wrapper_path="Wrappers_HPC/MPI_MD_Wrapper.py",
+    toml_config={
+        "mode": {"type": "lig"},
+        "paths": {
+            "ligand_folder": "./LAG3_Ligands",
+            "fixed_receptor_path": "./LAG3_receptor.pdb"
+        },
+        "md": {"steps": 500000}
+    }
+)
+
+# Write to file
+with open("lag3_job.sh", "w") as f:
+    f.write(script)
+```
+
+### Remote HPC Interaction
+
+Use `Lumi_Interface.py` to connect to LUMI and manage files and jobs:
+
+```python
+from HPC_MD.Lumi_Interface import HPCConnection
+
+# Connect to LUMI
+connection = HPCConnection(
+    hostname="lumi.csc.fi",
+    username="your_username",
+    key_path="~/.ssh/id_ed25519",
+    key_passphrase="your_passphrase"  # Optional
+)
+connection.connect()
+
+# Upload files and directories
+connection.upload_directory("./simulation_files", "/scratch/project_XXX/simulations")
+connection.upload_file("md_job.sh", "/scratch/project_XXX/simulations/md_job.sh")
+
+# Submit job and check status
+job_id = connection.submit_job("md_job.sh", working_dir="/scratch/project_XXX/simulations")
+status = connection.check_job_status(job_id)
+print(f"Job status: {status}")
+
+# Download results when complete
+connection.download_directory("/scratch/project_XXX/simulations/results", "./local_results")
+
+# Disconnect when done
+connection.disconnect()
+```
 
 ## Best Practices
 
