@@ -264,13 +264,13 @@ cat << EOF > select_gpu
 export PATH="{python_path}:$PATH"
 
 # Distribute the GPU for the ranks equally
-export ROCR_VISIBLE_DEVICES=$((SLURM_LOCALID % SLURM_GPUS_PER_NODE))
+export ROCR_VISIBLE_DEVICES=\$((SLURM_LOCALID % SLURM_GPUS_PER_NODE))
 
 # Only assign GPUs to ranks > 0 (workers)
-if [ $SLURM_PROCID -gt 0 ]; then
+if [ \$SLURM_PROCID -gt 0 ]; then
     # Adjust the calculation to account for rank 0 not using a GPU
-    worker_id=$((SLURM_PROCID - 1))
-    export ROCR_VISIBLE_DEVICES=$((worker_id % SLURM_GPUS_PER_NODE))
+    worker_id=\$((SLURM_PROCID - 1))
+    export ROCR_VISIBLE_DEVICES=\$((worker_id % SLURM_GPUS_PER_NODE))
 else
     # For rank 0, set an invalid GPU ID or leave it unset
     export ROCR_VISIBLE_DEVICES=""
