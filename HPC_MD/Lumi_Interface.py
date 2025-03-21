@@ -178,13 +178,14 @@ class HPCConnection:
         print(f"Downloading {remote_path} to {local_path}")
         self.sftp.get(remote_path, local_path)
     
-    def upload_directory(self, local_dir, remote_dir):
+    def upload_directory(self, local_dir, remote_dir, overwrite=False):
         """
         Upload a local directory to the HPC.
         
         Args:
             local_dir (str): Path to the local directory to upload
             remote_dir (str): Destination parent directory on the HPC
+            overwrite (bool, optional): If True, remove existing remote directory before uploading
         """
         if not self.sftp:
             raise Exception("Not connected. Call connect() first.")
@@ -201,6 +202,18 @@ class HPCConnection:
         local_path = Path(local_dir)
         if not local_path.is_dir():
             raise ValueError(f"Local path is not a directory: {local_dir}")
+        
+        # Check if target remote directory exists
+        try:
+            self.sftp.stat(target_remote_dir)
+            if overwrite:
+                print(f"Removing existing remote directory: {target_remote_dir}")
+                self.run_command(f"rm -rf {target_remote_dir}")
+                # Directory will be created below
+            # If not overwriting, just use the existing directory
+        except FileNotFoundError:
+            # Directory doesn't exist, create it
+            pass
         
         # Create target remote directory
         try:
@@ -229,13 +242,14 @@ class HPCConnection:
         
         print(f"Directory upload complete: {local_dir} → {target_remote_dir}")
     
-    def download_directory(self, remote_dir, local_dir):
+    def download_directory(self, remote_dir, local_dir, overwrite=False):
         """
         Download a remote directory from the HPC.
         
         Args:
             remote_dir (str): Path to the remote directory to download
             local_dir (str): Destination parent directory on the local system
+            overwrite (bool, optional): If True, remove existing local directory before downloading
         """
         if not self.sftp:
             raise Exception("Not connected. Call connect() first.")
@@ -247,6 +261,15 @@ class HPCConnection:
         # Get the remote directory name to preserve in local path
         remote_name = os.path.basename(remote_dir)
         target_local_dir = os.path.join(local_dir, remote_name)
+        
+        # Check if target local directory exists
+        if os.path.exists(target_local_dir):
+            if overwrite:
+                print(f"Removing existing local directory: {target_local_dir}")
+                import shutil
+                shutil.rmtree(target_local_dir)
+                # Will be created below
+            # If not overwriting, continue with existing directory
         
         # Create target local directory
         target_local_path = Path(target_local_dir)
@@ -421,7 +444,7 @@ class HPCConnection:
         
         return "UNKNOWN"
         
-    def download_and_rename_directory(self, remote_path, local_path, new_name=None):
+    def download_and_rename_directory(self, remote_path, local_path, new_name=None, overwrite=False):
         """
         Download a directory from remote HPC and optionally rename it.
         
@@ -430,6 +453,7 @@ class HPCConnection:
             local_path (str): Destination parent directory on local system
             new_name (str, optional): New name for the downloaded directory.
                                      If not provided, the original name is used.
+            overwrite (bool, optional): If True, remove existing local directory before downloading
         """
         # Normalize paths
         remote_path = os.path.normpath(remote_path)
@@ -442,7 +466,7 @@ class HPCConnection:
             
             # Get original files with the standard download method
             temp_local_dir = os.path.join(local_path, os.path.basename(remote_path))
-            self.download_directory(remote_path, local_path)
+            self.download_directory(remote_path, local_path, overwrite=overwrite)
             
             # Rename if the target directory exists
             if os.path.exists(temp_local_dir):
@@ -456,9 +480,9 @@ class HPCConnection:
                 print(f"Renamed downloaded directory to: {target_dir}")
         else:
             # No renaming, use standard download
-            self.download_directory(remote_path, local_path)
+            self.download_directory(remote_path, local_path, overwrite=overwrite)
         
-    def upload_and_rename_directory(self, local_path, remote_path, new_name=None):
+    def upload_and_rename_directory(self, local_path, remote_path, new_name=None, overwrite=False):
         """
         Upload a directory to remote HPC and optionally rename it.
         
@@ -467,6 +491,7 @@ class HPCConnection:
             remote_path (str): Destination parent directory on remote system
             new_name (str, optional): New name for the uploaded directory.
                                      If not provided, the original name is used.
+            overwrite (bool, optional): If True, remove existing remote directory before uploading
         """
         # Normalize paths
         local_path = os.path.normpath(os.path.expanduser(local_path))
@@ -479,7 +504,7 @@ class HPCConnection:
             target_remote_dir = os.path.join(remote_path, new_name)
             
             # First upload with original name
-            self.upload_directory(local_path, remote_path)
+            self.upload_directory(local_path, remote_path, overwrite=overwrite)
             
             # Then rename on remote system
             try:
@@ -501,4 +526,4 @@ class HPCConnection:
                 print(f"Error during remote rename: {str(e)}")
         else:
             # No renaming needed, use standard upload
-            self.upload_directory(local_path, remote_path)
+            self.upload_directory(local_path, remote_path, overwrite=overwrite)
