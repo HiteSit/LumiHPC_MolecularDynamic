@@ -38,7 +38,24 @@ except ImportError:
 Holo_MD Analysis Helpers
 ========================
 
-This module provides classes and functions for analyzing molecular dynamics simulations.
+A comprehensive toolkit for analyzing molecular dynamics (MD) simulations of protein-ligand complexes.
+
+This module provides classes and functions to process raw MD trajectories, analyze structural 
+dynamics, and visualize results through interactive plots and 3D structures.
+
+Key Features:
+------------
+- Process trajectories: remove water/ions, convert between formats (XTC, DCD, PDB)
+- Compute structural metrics: RMSD, RMSF, radius of gyration
+- Analyze conformational dynamics: PCA, normal mode analysis, clustering
+- Visualize results: interactive plots (plotly), 3D visualization (nglview)
+
+Dependencies:
+------------
+- Core analysis: pytraj, MDAnalysis, parmed
+- Data handling: pandas, numpy
+- Visualization: matplotlib, seaborn, plotly, nglview (optional)
+- Molecular handling: datamol
 
 Data Structure Philosophy:
 -------------------------
@@ -57,6 +74,13 @@ Data Structure Philosophy:
     ...
   }
 - Plotting functions accept this dictionary and use the 'CLASS' key to access analyzers
+
+Typical Workflow:
+---------------
+1. Identify MD directories with find_matching_directories()
+2. Create analyzer objects with create_analyzer_dict()
+3. Process trajectories and compute analyses through the MD_Analyzer objects
+4. Generate plots and visualizations with the plotting functions
 """
 
 def find_matching_directories(md_output_dir):
@@ -78,8 +102,12 @@ def find_matching_directories(md_output_dir):
             'DCD_WAT': '/path/to/trajectory.dcd'
         }
         
-        This dictionary is typically expanded later with additional file paths
-        and an analyzer object stored under the 'CLASS' key.
+    Notes:
+    ------
+    - The function searches for 'system.prmtop' files and DCD files ending with '0.dcd'
+    - Only directories matching the patterns in md_output_dir are included
+    - This dictionary is typically expanded later with additional file paths
+      and an analyzer object stored under the 'CLASS' key
     """
     file_paths = {}
     prmtop_filename = "system.prmtop"
@@ -120,7 +148,21 @@ def create_analyzer_dict(file_paths, overwrite=False):
     analyzer_dict : dict
         Dictionary with directory names as keys and subdictionaries as values.
         Each subdictionary contains the original file paths plus additional paths
-        and an 'CLASS' key with the analyzer object.
+        and a 'CLASS' key with the analyzer object.
+        
+    Notes:
+    ------
+    The function expects the following files to exist for each directory:
+    - system.prmtop (with water)
+    - system_noWAT.prmtop (without water)
+    - Step3_Md_Rep0.dcd (with water)
+    - Step3_Md_Rep0_noWAT.xtc (without water)
+    - Step3_Md_Rep0_noWAT.dcd (without water)
+    - Step3_Md_Rep0_WAT.dcd (sliced with water)
+    - Minimized_noWAT.pdb (structure without water)
+    - Clusters.pdb (cluster representatives)
+    
+    AssertionError is raised if any required file is missing.
     """
     analyzer_dict = file_paths.copy()
     for dirname, files in tqdm(file_paths.items(), desc="Creating analyzers"):
@@ -186,6 +228,22 @@ class Pytraj_Analysis():
     -----------
     traj_noWAT : pytraj.Trajectory
         Trajectory with water and ions removed
+    traj_WAT : pytraj.Trajectory, optional
+        Original trajectory with water and ions (only when overwrite=True)
+    traj_Cluster : pytraj.Trajectory, optional
+        Trajectory containing cluster representatives (only when clustering is performed)
+    
+    Notes:
+    ------
+    Processing steps with overwrite=True:
+    1. Load trajectory with stride
+    2. Fix periodic boundary conditions with autoimage
+    3. Align frames with superpose
+    4. Remove water, ions with atom masks
+    5. Write outputs in multiple formats
+    6. Perform clustering
+    
+    When overwrite=False, the class simply loads existing processed files.
     """
     def __init__(self, md_dir, traj_path, top_path, overwrite=False):
         self.md_dir = Path(md_dir)
@@ -253,6 +311,25 @@ class Pytraj_Analysis():
         pt.write_traj(str(self.pdb_path), self.traj_noWAT, frame_indices=[0], overwrite=True)
 
     def cluster_traj(self, cluster_opts):
+        """
+        Perform K-means clustering on the trajectory.
+        
+        Parameters:
+        -----------
+        cluster_opts : dict
+            Dictionary with clustering options:
+            - MASK_WAT: Atom mask to remove water
+            - MASK_CLUSTER: Atom mask for clustering (typically non-hydrogen)
+            - NUM: Number of clusters to generate
+            - SLICE: Frame stride for clustering
+            
+        Notes:
+        ------
+        This creates a trajectory of cluster representatives (self.traj_Cluster)
+        and writes it to a PDB file with multiple models.
+        
+        Clustering is performed on a subset of frames to improve performance.
+        """
         try:
             mask_wat = cluster_opts["MASK_WAT"]
             mask_cluster = cluster_opts["MASK_CLUSTER"]
@@ -284,6 +361,21 @@ class Pytraj_Analysis():
             print(f"Cluster FAIL for {self.md_dir}\nError: {e}")
     
     def PCA(self):
+        """
+        Perform Principal Component Analysis (PCA) on trajectory.
+        
+        Returns:
+        --------
+        tuple
+            (PCA_data, trajectory)
+            - PCA_data: numpy array with principal component projections
+            - trajectory: pytraj.Trajectory used for analysis
+            
+        Notes:
+        ------
+        PCA is performed on non-hydrogen atoms first and then on backbone
+        atoms (CA, N). Only the second analysis results are returned.
+        """
         traj_PCA = self.traj_noWAT
         data_PCA = pt.pca(traj_PCA, mask='!@H=', n_vecs=2)
         data_PCA = pt.pca(traj_PCA, mask='@CA,@N', n_vecs=2)
@@ -292,6 +384,20 @@ class Pytraj_Analysis():
         return PCA, traj_PCA
     
     def plot_PCA(self, title="PCA", filepath=None):
+        """
+        Plot the first two principal components as a 2D scatter plot.
+        
+        Parameters:
+        -----------
+        title : str, optional
+            Plot title. Default is "PCA".
+        filepath : str or Path, optional
+            If provided, save the figure to this path. Default is None.
+            
+        Notes:
+        ------
+        Points are colored by frame index to show the trajectory progression.
+        """
         PCA, traj_PCA = self.PCA()
         
         fig, ax = plt.subplots(figsize=(10, 5))
@@ -333,6 +439,12 @@ class MDA_Analysis():
     -----------
     universe : MDAnalysis.Universe
         MDAnalysis Universe object containing the topology and trajectory
+        
+    Notes:
+    ------
+    This class complements Pytraj_Analysis with additional analyses 
+    available in the MDAnalysis package. It assumes trajectories have 
+    already been processed (waters removed, aligned, etc.).
     """
     def __init__(self, md_dir):
         md_dir_path = Path(md_dir)
@@ -346,6 +458,26 @@ class MDA_Analysis():
         self.universe = mda.Universe(str(prmtop_harmon_path), str(traj_harmon_path))
     
     def calc_rmsf(self):
+        """
+        Calculate Root Mean Square Fluctuation (RMSF) for C-alpha atoms.
+        
+        Returns:
+        --------
+        tuple
+            (rmsf, c_alphas)
+            - rmsf: numpy array with RMSF values
+            - c_alphas: AtomGroup of C-alpha atoms
+            
+        Notes:
+        ------
+        RMSF quantifies the structural flexibility of different protein regions.
+        Higher values indicate more flexible regions.
+        
+        The calculation includes:
+        1. Generating an average structure
+        2. Aligning all frames to this average
+        3. Computing RMSF for C-alpha atoms
+        """
         self.universe.trajectory[0]
         # Precompute RMSF
         average = align.AverageStructure(self.universe, self.universe, select='protein and name CA', ref_frame=0).run()
@@ -358,6 +490,14 @@ class MDA_Analysis():
         return rmsf, c_alphas
     
     def plot_rmsf(self):
+        """
+        Plot the Root Mean Square Fluctuation (RMSF) by residue.
+        
+        Notes:
+        ------
+        Creates a line plot of RMSF values vs. residue IDs.
+        Higher values indicate regions with greater structural flexibility.
+        """
         rmsf, c_alphas = self.calc_rmsf()
         
         # Plot the chart
@@ -370,12 +510,38 @@ class MDA_Analysis():
         plt.show()
     
     def calc_rmsd(self):
+        """
+        Calculate Root Mean Square Deviation (RMSD) throughout the trajectory.
+        
+        Returns:
+        --------
+        numpy.ndarray
+            Array of RMSD values for each frame, with columns for:
+            - Frame number
+            - Time
+            - RMSD for full system
+            - RMSD for protein backbone
+            - RMSD for ligand (residue UNK)
+            
+        Notes:
+        ------
+        RMSD measures structural deviation from the reference frame (first frame).
+        Lower values indicate structures more similar to the reference.
+        """
         # Restart trajectory
         self.universe.trajectory[0]
         rmsd = rms.RMSD(self.universe, select="all", groupselections=["protein and backbone", "resname UNK"]).run().results.rmsd
         return rmsd
     
     def plot_rmsd(self):
+        """
+        Plot RMSD (Root Mean Square Deviation) over time.
+        
+        Notes:
+        ------
+        Creates a line plot of RMSD values for protein backbone and ligand.
+        Shows structural deviation from the reference frame throughout the trajectory.
+        """
         rmsd = self.calc_rmsd()
         
         # Plot the chart
@@ -387,6 +553,29 @@ class MDA_Analysis():
         plt.show()
     
     def gaussian_elastic(self, close=False):
+        """
+        Perform Gaussian Network Model (GNM) analysis.
+        
+        Parameters:
+        -----------
+        close : bool, optional
+            If True, use closeContactGNMAnalysis. If False, use standard GNMAnalysis.
+            Default is False.
+            
+        Returns:
+        --------
+        MDAnalysis.analysis.gnm.GNMResult
+            Results of the GNM analysis, including:
+            - eigenvalues: Vibrational modes
+            - eigenvectors: Corresponding motion vectors
+            - array: Raw data
+            - timescales: Estimated timescales of motions
+            
+        Notes:
+        ------
+        GNM models protein dynamics as a network of harmonic springs,
+        revealing collective motions and identifying functional domains.
+        """
         self.universe.trajectory[0]
         if close == False:
             nma = gnm.GNMAnalysis(self.universe, select='protein and name CA', cutoff=7.0).run()
@@ -399,6 +588,24 @@ class MDA_Analysis():
             return nma_res
     
     def radgyr_run(self):
+        """
+        Calculate radius of gyration throughout the trajectory.
+        
+        Returns:
+        --------
+        numpy.ndarray
+            Timeseries of radius of gyration values with columns for:
+            - Overall Rg
+            - Rg along x-axis
+            - Rg along y-axis
+            - Rg along z-axis
+            
+        Notes:
+        ------
+        Radius of gyration measures the compactness of the protein structure.
+        Lower values indicate more compact conformations.
+        The calculation is mass-weighted.
+        """
         self.universe.trajectory[0]
         def radgyr(atomgroup, masses, total_mass=None):
             # coordinates change for each frame
@@ -427,6 +634,16 @@ class MDA_Analysis():
         return rog.results["timeseries"]
     
     def radgyr_run_plot(self):
+        """
+        Plot radius of gyration over time.
+        
+        Notes:
+        ------
+        Creates a line plot showing the overall radius of gyration and
+        its components along each axis throughout the trajectory.
+        
+        This provides insight into protein compactness changes during simulation.
+        """
         rog = self.radgyr_run()
         
         labels = ['all', 'x-axis', 'y-axis', 'z-axis']
@@ -439,6 +656,26 @@ class MDA_Analysis():
         plt.show()
     
     def PCA_mda(self, components=2):
+        """
+        Perform Principal Component Analysis using MDAnalysis.
+        
+        Parameters:
+        -----------
+        components : int, optional
+            Number of principal components to compute. Default is 2.
+            
+        Returns:
+        --------
+        tuple
+            (cumulative_df, transformed_df)
+            - cumulative_df: Dictionary with cumulative variance for each PC
+            - transformed_df: DataFrame with transformed coordinates and frame numbers
+            
+        Notes:
+        ------
+        PCA identifies the most significant collective motions in the trajectory.
+        The analysis is performed on backbone atoms after alignment.
+        """
         # Reload the universe
         u = self.universe
         
@@ -464,7 +701,24 @@ class MDA_Analysis():
         return cumulative_df, transformed_df
     
     def plot_PCA_3D(self, title="PairGrid PCA", filepath=None):
+        """
+        Create a pairwise grid plot of the first three principal components.
         
+        Parameters:
+        -----------
+        title : str, optional
+            Plot title. Default is "PairGrid PCA".
+        filepath : str or Path, optional
+            If provided, save figure to this path. Default is None.
+            
+        Notes:
+        ------
+        Creates a grid of scatter plots showing relationships between
+        the first three principal components, colored by frame number.
+        
+        This visualization helps identify conformational clusters and
+        transitions in the trajectory.
+        """
         _, transformed_df = self.PCA_mda()
         
         g = sns.PairGrid(transformed_df, hue="Frames", palette=sns.color_palette("viridis", self.universe.trajectory.n_frames))
@@ -496,11 +750,13 @@ class MD_Analyzer(Pytraj_Analysis, MDA_Analysis):
     overwrite : bool
         Whether to overwrite existing processed files
     
-    Usage:
+    Notes:
     ------
-    This class is typically instantiated for each simulation directory and
-    stored in a dictionary under the 'CLASS' key:
+    This class combines the capabilities of both pytraj and MDAnalysis:
+    - Pytraj for trajectory processing, format conversion, and clustering
+    - MDAnalysis for advanced analyses like RMSF, RMSD, radius of gyration, and GNM
     
+    Typically instantiated for each simulation directory and stored in a dictionary:
     file_dict['simulation_dir']['CLASS'] = MD_Analyzer(...)
     """
     def __init__(self, md_dir, traj_path, top_path, overwrite):
@@ -508,9 +764,9 @@ class MD_Analyzer(Pytraj_Analysis, MDA_Analysis):
         Pytraj_Analysis.__init__(self, md_dir, traj_path, top_path, overwrite)
         MDA_Analysis.__init__(self, md_dir)
 
-##########################
-### Plotting Functions ###
-##########################
+# =============================
+# === Plotting Functions ===
+# =============================
 """
 Plotting Functions
 -----------------
@@ -536,13 +792,26 @@ Example dictionary structure:
   
 def plot_RMSF_inplace(analyzer_dict):
     """
-    Plot RMSF values for multiple analyzers using a dictionary.
+    Plot RMSF values for multiple analyzers using an interactive Plotly figure.
     
     Parameters:
     -----------
     analyzer_dict : dict
         Dictionary with directory names as keys and subdictionaries as values.
         Each subdictionary must contain a 'CLASS' key with the analyzer object.
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing the Plotly figure object under the 'Figure' key.
+        
+    Notes:
+    ------
+    Creates an interactive line plot showing RMSF (Root Mean Square Fluctuation) 
+    by residue for each trajectory in the analyzer_dict.
+    
+    RMSF values indicate local flexibility - higher values represent more 
+    flexible regions of the protein.
     """
     fig = go.Figure()
     for label, data in analyzer_dict.items():
@@ -562,17 +831,36 @@ def plot_RMSF_inplace(analyzer_dict):
         legend_title='MD Directory',
         height=600
     )
-    fig.show()
+    return {"Figure": fig}
 
 def plot_RMSD_inplace(analyzer_dict):
     """
-    Plot RMSD values for multiple analyzers using a dictionary.
+    Plot RMSD values for multiple analyzers using an interactive Plotly figure.
     
     Parameters:
     -----------
     analyzer_dict : dict
         Dictionary with directory names as keys and subdictionaries as values.
         Each subdictionary must contain a 'CLASS' key with the analyzer object.
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing:
+        - 'Figure': Plotly figure object
+        - 'Data': Dictionary with DataFrames
+          - 'Combined': All RMSD data
+          - 'Summary': Statistical summary by simulation
+        
+    Notes:
+    ------
+    RMSD (Root Mean Square Deviation) measures structural deviation from the
+    reference frame. Lower values indicate structures closer to the reference.
+    
+    This function creates:
+    1. An interactive plot showing RMSD over time for each trajectory
+    2. A combined DataFrame with all RMSD data
+    3. A summary DataFrame with statistics (mean, std, min, max) for each trajectory
     """
     fig = go.Figure()
     df_RMSD_lst = []
@@ -609,7 +897,6 @@ def plot_RMSD_inplace(analyzer_dict):
         legend_title='MD Directory',
         height=800,
     )
-    fig.show()
     
     # Concatenate all dataframes
     df_combined = pd.concat(df_RMSD_lst)
@@ -618,20 +905,33 @@ def plot_RMSD_inplace(analyzer_dict):
     df_summary = df_combined.groupby('Complex')['RMSD'].agg(['mean', 'std', 'min', 'max']).reset_index()
     df_summary = df_summary.sort_values('mean')
     
-    print("Summary of RMSD values by complex (sorted by mean):")
-    print(df_summary)
-    
-    return df_combined, df_summary
+    return {
+        "Figure": fig,
+        "Data": {"Combined": df_combined, "Summary": df_summary}
+    }
 
 def plot_Radius_inplace(analyzer_dict):
     """
-    Plot Radius of Gyration for multiple analyzers using a dictionary.
+    Plot Radius of Gyration for multiple analyzers using an interactive Plotly figure.
     
     Parameters:
     -----------
     analyzer_dict : dict
         Dictionary with directory names as keys and subdictionaries as values.
         Each subdictionary must contain a 'CLASS' key with the analyzer object.
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing the Plotly figure object under the 'Figure' key.
+        
+    Notes:
+    ------
+    Radius of gyration measures the compactness of the protein structure.
+    Lower values indicate more compact conformations.
+    
+    This function creates an interactive line plot showing how the overall
+    radius of gyration changes over time for each trajectory.
     """
     fig = go.Figure()
     for label, data in analyzer_dict.items():
@@ -648,21 +948,34 @@ def plot_Radius_inplace(analyzer_dict):
     fig.update_layout(
         title='Radius of Gyration',
         xaxis_title='Frame',
-        yaxis_title='RMSD (Å)',
+        yaxis_title='Radius of Gyration (Å)',  # Fixed label from RMSD to Radius of Gyration
         legend_title='MD Directory',
         height=600
     )
-    fig.show()
+    return {"Figure": fig}
 
 def plot_Gaussian_inplace(analyzer_dict):
     """
-    Plot Gaussian Network Model for multiple analyzers using a dictionary.
+    Plot Gaussian Network Model (GNM) results for multiple analyzers.
     
     Parameters:
     -----------
     analyzer_dict : dict
         Dictionary with directory names as keys and subdictionaries as values.
         Each subdictionary must contain a 'CLASS' key with the analyzer object.
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing the Plotly figure object under the 'Figure' key.
+        
+    Notes:
+    ------
+    GNM analyzes protein dynamics as a network of harmonic springs, revealing
+    the spectrum of collective motions.
+    
+    This function plots eigenvalues (which correspond to vibrational modes)
+    versus time for each trajectory, showing the dominant motions in the system.
     """
     fig = go.Figure()
     for label, data in analyzer_dict.items():
@@ -680,17 +993,31 @@ def plot_Gaussian_inplace(analyzer_dict):
         legend_title='MD Directory',
         height=600
     )
-    fig.show()
+    return {"Figure": fig}
 
 def plot_PCA_inplace(analyzer_dict):
     """
-    Plot PCA for multiple analyzers using a dictionary.
+    Plot PCA results for multiple analyzers using matplotlib.
     
     Parameters:
     -----------
     analyzer_dict : dict
         Dictionary with directory names as keys and subdictionaries as values.
         Each subdictionary must contain a 'CLASS' key with the analyzer object.
+
+    Returns:
+    --------
+    dict
+        Dictionary containing the matplotlib figure object under the 'Figure' key.
+        
+    Notes:
+    ------
+    Creates a grid of scatter plots, one for each trajectory in analyzer_dict.
+    Each plot shows the first two principal components, with points colored
+    by frame number to visualize conformational transitions.
+    
+    PCA identifies the most significant collective motions in the trajectory,
+    helping to identify major conformational states and transitions.
     """
     n_plots = len(analyzer_dict)
     n_cols = 2
@@ -700,36 +1027,149 @@ def plot_PCA_inplace(analyzer_dict):
     fig_height = 5 * n_rows  # 5 inches per row
 
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
-    
+
     # Handle the case where there's only one plot
     if n_plots == 1:
         axs = np.array([axs])
-    
+
     for ax, (title, data) in zip(axs.flatten(), analyzer_dict.items()):
         analyzer = data['CLASS']  # Get the analyzer object from the CLASS key
-        PCA, traj_PCA = analyzer.PCA()
+        try:
+            PCA, traj_PCA = analyzer.PCA()
+        except Exception as e:
+            print(f"Error processing analyzer '{title}': {e}")
+            continue  # Skip to the next analyzer
+
         scatter = ax.scatter(PCA[0], PCA[1], marker='o', c=range(traj_PCA.n_frames), alpha=0.5)
-        
+
         ax.set_title(title)
         ax.set_xlabel("PC1")
         ax.set_ylabel("PC2")
         ax.axhline(y=0, color='gray', linestyle='--')
         ax.axvline(x=0, color='gray', linestyle='--')
         ax.grid(False)
-        
+
         cbar = plt.colorbar(scatter, ax=ax)
         cbar.set_label("Frame")
-    
+
     # Handle empty subplots if there are more subplots than analyzers
     for i in range(n_plots, len(axs.flatten())):
         axs.flatten()[i].set_visible(False)
-        
-    plt.tight_layout()
-    plt.show()
 
-####################################
-### Trajectory Archive Functions ###
-####################################
+    plt.tight_layout()
+    return {"Figure": fig}
+
+def plotter_saver(analysis_paths, output_dir=None, plot_types=None, show=False):
+    """
+    Generate and save various types of plots from MD analysis data.
+    
+    Parameters:
+    -----------
+    analysis_paths : dict
+        Dictionary containing analysis data, including the 'CLASS' key
+        for accessing analyzer objects.
+    output_dir : str or Path, optional
+        Directory where the plots will be saved. If None, plots are only displayed
+        and not saved to disk. Default is None.
+    plot_types : list or str, optional
+        Types of plots to generate. Can be:
+        - list: ['RMSF', 'RMSD', 'Radius', 'Gaussian', 'PCA']
+        - 'all': generate all available plot types
+        - None: generate only RMSF, RMSD, and Radius plots (default)
+    show : bool, optional
+        If True, displays the plots. Default is False.
+        
+    Returns:
+    --------
+    dict
+        Dictionary with plot types as keys and figure objects as values.
+        
+    Notes:
+    ------
+    Plotly figures (RMSF, RMSD, Radius, Gaussian) are saved as HTML files.
+    Matplotlib figures (PCA) are saved as PNG files.
+    
+    This function provides a convenient interface to generate multiple plot types
+    at once and handle file saving with appropriate formats.
+    """
+    # Available plot types and their corresponding functions
+    available_plots = {
+        'RMSF': plot_RMSF_inplace,
+        'RMSD': plot_RMSD_inplace,
+        'Radius': plot_Radius_inplace,
+        'Gaussian': plot_Gaussian_inplace,
+        'PCA': plot_PCA_inplace
+    }
+    
+    # Create output directory if specified
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    
+    # Determine which plots to generate
+    if plot_types is None:
+        plot_types = ['RMSF', 'RMSD', 'Radius']
+    elif plot_types == 'all':
+        plot_types = list(available_plots.keys())
+    elif isinstance(plot_types, str):
+        plot_types = [plot_types]
+    
+    # Dictionary to store generated figures
+    figures = {}
+    
+    # Generate and save each requested plot type
+    for plot_type in plot_types:
+        if plot_type not in available_plots:
+            print(f"Warning: Plot type '{plot_type}' not recognized. Skipping.")
+            continue
+            
+        try:
+            # Generate the plot
+            plot_func = available_plots[plot_type]
+            
+            # PCA is a matplotlib plot, others are plotly plots
+            if plot_type == 'PCA':
+                result = plot_func(analysis_paths)
+                fig = result.get("Figure")  # Get the actual matplotlib figure from the result dictionary
+                figures[plot_type] = fig
+                
+                # Save the figure if output directory is specified
+                if output_dir:
+                    filepath = os.path.join(output_dir, f"{plot_type}.png")
+                    fig.savefig(filepath)
+                    print(f"Saved {plot_type} plot to {filepath}")
+                
+                # Show the figure if requested
+                if show:
+                    plt.figure(fig.number)
+                    plt.show()
+            else:
+                # Handle Plotly plots (RMSF, RMSD, Radius, Gaussian)
+                result = plot_func(analysis_paths)
+                fig = result.get("Figure")
+                if fig is None:
+                    print(f"Warning: No figure returned for '{plot_type}'. Skipping.")
+                    continue
+                
+                figures[plot_type] = fig
+                
+                # Save the figure if output directory is specified
+                if output_dir:
+                    filepath = os.path.join(output_dir, f"{plot_type}.html")
+                    fig.write_html(filepath)
+                    print(f"Saved {plot_type} plot to {filepath}")
+                
+                # Show the figure if requested
+                if show:
+                    fig.show()
+                    
+        except Exception as e:
+            print(f"Error generating {plot_type} plot: {e}")
+    
+    return figures
+
+# =====================================
+# === Trajectory Archive Functions ===
+# =====================================
 
 def create_trajectory_archive(zip_filename, file_paths):
     """
@@ -737,10 +1177,21 @@ def create_trajectory_archive(zip_filename, file_paths):
     
     Parameters:
     -----------
-    zip_filename : str
+    zip_filename : str or Path
         Path to the output zip file
     file_paths : dict
         Dictionary containing paths to trajectory files for each run directory
+        
+    Notes:
+    ------
+    This function packages essential simulation files for each directory:
+    - Topology files (with and without water)
+    - Trajectory files (DCD and XTC, with and without water)
+    - PDB structure files
+    - Cluster files
+    
+    The archive maintains the original directory structure, making it suitable
+    for transferring simulations between systems or for backup purposes.
     """
     zip_path = Path(zip_filename)
     with zipfile.ZipFile(zip_path, 'w') as zipf:
@@ -791,9 +1242,9 @@ def create_trajectory_archive(zip_filename, file_paths):
                 zipf.write(cluster, arcname)
 
 
-###################################
-### Trajectory Viewer Functions ###
-###################################
+# ===================================
+# === Trajectory Viewer Functions ===
+# ===================================
         
 class TrajectoryViewer:
     """
@@ -863,6 +1314,15 @@ class TrajectoryViewer:
         str
             String of residue IDs formatted for nglview selection
             (e.g., "1 or 2 or 3")
+            
+        Notes:
+        ------
+        This method:
+        1. Uses pytraj's search_neighbors to find atoms near the ligand (UNK)
+        2. Extracts unique residue IDs from these atoms
+        3. Formats them as a selection string for nglview
+        
+        The 6.5Å cutoff identifies the binding site residues for visualization.
         """
         from itertools import chain
         atom_ndx = pt.search_neighbors(traj, mask=":UNK<:6.5")
@@ -892,6 +1352,15 @@ class TrajectoryViewer:
         --------
         nglview.NGLWidget
             Interactive widget for trajectory visualization
+            
+        Notes:
+        ------
+        The visualization contains three representations:
+        1. Protein backbone as cartoon, colored by residue index
+        2. Ligand as licorice representation (excluding hydrogens)
+        3. Binding site residues as licorice representation (excluding hydrogens)
+        
+        The view is centered on the ligand for better visualization of binding interactions.
         """
         traj = pt.iterload(self.analyzer_dict[self.dirname]["XTC_noWAT"], 
                           self.analyzer_dict[self.dirname]["PRMTOP_noWAT"])
