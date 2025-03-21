@@ -276,7 +276,7 @@ else
     export ROCR_VISIBLE_DEVICES=""
 fi
 
-exec $*
+exec \$*
 EOF
 
 chmod +x ./select_gpu

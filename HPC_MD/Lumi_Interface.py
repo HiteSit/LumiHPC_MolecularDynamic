@@ -180,11 +180,11 @@ class HPCConnection:
     
     def upload_directory(self, local_dir, remote_dir):
         """
-        Upload an entire directory to the HPC.
+        Upload a local directory to the HPC.
         
         Args:
             local_dir (str): Path to the local directory to upload
-            remote_dir (str): Destination path on the HPC
+            remote_dir (str): Destination parent directory on the HPC
         """
         if not self.sftp:
             raise Exception("Not connected. Call connect() first.")
@@ -193,45 +193,49 @@ class HPCConnection:
         local_dir = os.path.normpath(os.path.expanduser(local_dir))
         remote_dir = os.path.normpath(remote_dir)
         
-        # Get the base directory name from local path
-        local_base = os.path.basename(local_dir)
-        local_path = Path(local_dir)
+        # Get the local directory name to preserve in remote path
+        local_name = os.path.basename(local_dir)
+        target_remote_dir = os.path.join(remote_dir, local_name)
         
+        # Verify local path is a directory
+        local_path = Path(local_dir)
         if not local_path.is_dir():
             raise ValueError(f"Local path is not a directory: {local_dir}")
         
-        # Create remote directory if it doesn't exist
+        # Create target remote directory
         try:
-            self.sftp.stat(remote_dir)
+            self.sftp.stat(target_remote_dir)
         except FileNotFoundError:
-            self._mkdir_p(remote_dir)
+            self._mkdir_p(target_remote_dir)
+            
+        print(f"Uploading directory '{local_dir}' to '{target_remote_dir}'")
             
         # Upload all files and subdirectories
         for item in local_path.glob('**/*'):
             if item.is_file():
                 # Get the relative path from the source directory
                 relative_path = item.relative_to(local_path)
-                remote_path = f"{remote_dir}/{relative_path}"
+                remote_file_path = f"{target_remote_dir}/{relative_path}"
                 
                 # Create remote parent directories if needed
-                remote_parent = os.path.dirname(remote_path)
+                remote_parent = os.path.dirname(remote_file_path)
                 try:
                     self.sftp.stat(remote_parent)
                 except FileNotFoundError:
                     self._mkdir_p(remote_parent)
                     
-                print(f"Uploading {item} to {remote_path}")
-                self.sftp.put(str(item), remote_path)
+                print(f"Uploading {item} to {remote_file_path}")
+                self.sftp.put(str(item), remote_file_path)
         
-        print(f"Directory upload complete: {local_dir} → {remote_dir}")
+        print(f"Directory upload complete: {local_dir} → {target_remote_dir}")
     
     def download_directory(self, remote_dir, local_dir):
         """
-        Download an entire directory from the HPC.
+        Download a remote directory from the HPC.
         
         Args:
             remote_dir (str): Path to the remote directory to download
-            local_dir (str): Destination path on the local system
+            local_dir (str): Destination parent directory on the local system
         """
         if not self.sftp:
             raise Exception("Not connected. Call connect() first.")
@@ -240,9 +244,15 @@ class HPCConnection:
         remote_dir = os.path.normpath(remote_dir)
         local_dir = os.path.normpath(os.path.expanduser(local_dir))
         
-        # Create local directory if it doesn't exist
-        local_path = Path(local_dir)
-        local_path.mkdir(parents=True, exist_ok=True)
+        # Get the remote directory name to preserve in local path
+        remote_name = os.path.basename(remote_dir)
+        target_local_dir = os.path.join(local_dir, remote_name)
+        
+        # Create target local directory
+        target_local_path = Path(target_local_dir)
+        target_local_path.mkdir(parents=True, exist_ok=True)
+        
+        print(f"Downloading directory '{remote_dir}' to '{target_local_dir}'")
         
         # Get remote files with full paths (only files, not directories)
         files = self._get_all_remote_files(remote_dir)
@@ -250,37 +260,30 @@ class HPCConnection:
         if not files:
             print(f"Warning: No files found in remote directory: {remote_dir}")
             return
-            
-        # Get the remote base directory name
-        remote_base = os.path.basename(remote_dir)
         
         for remote_path in files:
             try:
                 # Create proper relative paths by stripping remote_dir
                 remote_path_normalized = os.path.normpath(remote_path)
                 
-                # Calculate the relative path correctly
+                # Skip the directory itself
                 if remote_path_normalized == remote_dir:
-                    # Skip the directory itself
                     continue
                     
-                # Strip the remote_dir prefix and keep the rest of the path
+                # Get the path relative to the remote directory
                 if remote_path_normalized.startswith(remote_dir):
                     # Get relative path (remove remote_dir prefix plus separator)
                     rel_path = remote_path_normalized[len(remote_dir):]
-                    rel_path = rel_path.lstrip('/').lstrip('\\')  # Handle both Unix and Windows
-                    local_file_path = local_path / rel_path
+                    rel_path = rel_path.lstrip('/').lstrip('\\')
+                    local_file_path = target_local_path / rel_path
                     
                     # Create parent directories if needed
                     local_file_path.parent.mkdir(parents=True, exist_ok=True)
                     
-                    # Make sure we're dealing with a file, not a directory
+                    # Skip directories, only download files
                     try:
                         attr = self.sftp.stat(remote_path)
-                        is_directory = self._is_dir_from_attr(attr)
-                        
-                        if is_directory:
-                            print(f"Skipping directory: {remote_path}")
+                        if self._is_dir_from_attr(attr):
                             continue
                         
                         print(f"Downloading {remote_path} to {local_file_path}")
@@ -292,8 +295,8 @@ class HPCConnection:
             except Exception as e:
                 print(f"Error processing path {remote_path}: {str(e)}")
         
-        print(f"Directory download complete: {remote_dir} → {local_dir}")
-            
+        print(f"Directory download complete: {remote_dir} → {target_local_dir}")
+        
     def _get_all_remote_files(self, remote_dir):
         """
         Recursively get all files in a remote directory.
@@ -432,17 +435,28 @@ class HPCConnection:
         remote_path = os.path.normpath(remote_path)
         local_path = os.path.normpath(os.path.expanduser(local_path))
         
-        # Get the original directory name
-        orig_name = os.path.basename(remote_path)
-        
-        # Set the target directory name
-        target_name = new_name if new_name else orig_name
-        
-        # Create the full local path
-        full_local_path = os.path.join(local_path, target_name)
-        
-        print(f"Downloading directory '{remote_path}' to '{full_local_path}'")
-        self.download_directory(remote_path, full_local_path)
+        if new_name:
+            # If a new name is provided, we need to download to parent dir and rename
+            # Create parent directory if it doesn't exist
+            os.makedirs(local_path, exist_ok=True)
+            
+            # Get original files with the standard download method
+            temp_local_dir = os.path.join(local_path, os.path.basename(remote_path))
+            self.download_directory(remote_path, local_path)
+            
+            # Rename if the target directory exists
+            if os.path.exists(temp_local_dir):
+                target_dir = os.path.join(local_path, new_name)
+                # Remove target directory if it already exists
+                if os.path.exists(target_dir):
+                    import shutil
+                    shutil.rmtree(target_dir)
+                # Rename to target name
+                os.rename(temp_local_dir, target_dir)
+                print(f"Renamed downloaded directory to: {target_dir}")
+        else:
+            # No renaming, use standard download
+            self.download_directory(remote_path, local_path)
         
     def upload_and_rename_directory(self, local_path, remote_path, new_name=None):
         """
@@ -458,14 +472,33 @@ class HPCConnection:
         local_path = os.path.normpath(os.path.expanduser(local_path))
         remote_path = os.path.normpath(remote_path)
         
-        # Get the original directory name
-        orig_name = os.path.basename(local_path)
-        
-        # Set the target directory name
-        target_name = new_name if new_name else orig_name
-        
-        # Create the full remote path
-        full_remote_path = os.path.join(remote_path, target_name)
-        
-        print(f"Uploading directory '{local_path}' to '{full_remote_path}'")
-        self.upload_directory(local_path, full_remote_path)
+        if new_name:
+            # If new name is provided, we need a special handling
+            local_name = os.path.basename(local_path)
+            orig_remote_dir = os.path.join(remote_path, local_name)
+            target_remote_dir = os.path.join(remote_path, new_name)
+            
+            # First upload with original name
+            self.upload_directory(local_path, remote_path)
+            
+            # Then rename on remote system
+            try:
+                # Check if target already exists and remove it
+                try:
+                    self.sftp.stat(target_remote_dir)
+                    # If exists, remove it with a command
+                    self.run_command(f"rm -rf {target_remote_dir}")
+                except FileNotFoundError:
+                    pass
+                
+                # Rename using mv command
+                _, error, status = self.run_command(f"mv {orig_remote_dir} {target_remote_dir}")
+                if status == 0:
+                    print(f"Renamed uploaded directory to: {target_remote_dir}")
+                else:
+                    print(f"Failed to rename directory: {error}")
+            except Exception as e:
+                print(f"Error during remote rename: {str(e)}")
+        else:
+            # No renaming needed, use standard upload
+            self.upload_directory(local_path, remote_path)
